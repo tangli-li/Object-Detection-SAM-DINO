@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # DINO <img src="figs/dinosaur.png" width="30">
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/dino-detr-with-improved-denoising-anchor-1/object-detection-on-coco-minival)](https://paperswithcode.com/sota/object-detection-on-coco-minival?p=dino-detr-with-improved-denoising-anchor-1)
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/dino-detr-with-improved-denoising-anchor-1/object-detection-on-coco)](https://paperswithcode.com/sota/object-detection-on-coco?p=dino-detr-with-improved-denoising-anchor-1)
@@ -400,3 +401,7 @@ If you find our work helpful for your research, please consider citing the follo
       url={https://openreview.net/forum?id=oMI9PjOb9Jl}
 }
 ```
+=======
+# Object-Detection-SAM-DINO
+NTU dissertation
+>>>>>>> a8d782853d3f7101862c5b050d9c46439598b9a1
