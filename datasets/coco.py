@@ -318,14 +318,62 @@ dataset_hook_register = {
     'MaskCrop': MaskCrop,
     'BboxPertuber': BboxPertuber,
 }
+# class CocoDetection(torchvision.datasets.CocoDetection):
+#     def __init__(self, img_folder, ann_file, transforms, return_masks, aux_target_hacks=None,image_set=None,post_frames=3):
+#         super(CocoDetection, self).__init__(img_folder, ann_file)
+#         self._transforms = transforms
+#         self.prepare = ConvertCocoPolysToMask(return_masks)
+#         self.aux_target_hacks = aux_target_hacks
+#         self.data_type=image_set
+#         self.post_frames=post_frames
 
+#     def change_hack_attr(self, hackclassname, attrkv_dict):
+#         target_class = dataset_hook_register[hackclassname]
+#         for item in self.aux_target_hacks:
+#             if isinstance(item, target_class):
+#                 for k,v in attrkv_dict.items():
+#                     setattr(item, k, v)
+
+#     def get_hack(self, hackclassname):
+#         target_class = dataset_hook_register[hackclassname]
+#         for item in self.aux_target_hacks:
+#             if isinstance(item, target_class):
+#                 return item
+
+#     def __getitem__(self, idx):
+#         """
+#         Output:
+#             - target: dict of multiple items
+#                 - boxes: Tensor[num_box, 4]. \
+#                     Init type: x0,y0,x1,y1. unnormalized data.
+#                     Final type: cx,cy,w,h. normalized data. 
+#         """
+#         try:
+#             img, target = super(CocoDetection, self).__getitem__(idx)
+#         except:
+#             print("Error idx: {}".format(idx))
+#             idx += 1
+#             img, target = super(CocoDetection, self).__getitem__(idx)
+#         image_id = self.ids[idx]
+#         target = {'image_id': image_id, 'annotations': target}
+#         img, target = self.prepare(img, target)
+        
+#         if self._transforms is not None:
+#             img, target = self._transforms(img, target)
+
+#         if self.aux_target_hacks is not None:
+#             for hack_runner in self.aux_target_hacks:
+#                 target, img = hack_runner(target, img=img)
+#         return img, target
 
 class CocoDetection(torchvision.datasets.CocoDetection):
-    def __init__(self, img_folder, ann_file, transforms, return_masks, aux_target_hacks=None):
+    def __init__(self, img_folder, ann_file, transforms, return_masks, aux_target_hacks=None,image_set=None,post_frames=3):
         super(CocoDetection, self).__init__(img_folder, ann_file)
         self._transforms = transforms
         self.prepare = ConvertCocoPolysToMask(return_masks)
         self.aux_target_hacks = aux_target_hacks
+        self.data_type=image_set
+        self.post_frames=post_frames
 
     def change_hack_attr(self, hackclassname, attrkv_dict):
         target_class = dataset_hook_register[hackclassname]
@@ -348,25 +396,84 @@ class CocoDetection(torchvision.datasets.CocoDetection):
                     Init type: x0,y0,x1,y1. unnormalized data.
                     Final type: cx,cy,w,h. normalized data. 
         """
-        try:
-            img, target = super(CocoDetection, self).__getitem__(idx)
-        except:
-            print("Error idx: {}".format(idx))
-            idx += 1
-            img, target = super(CocoDetection, self).__getitem__(idx)
-        image_id = self.ids[idx]
-        target = {'image_id': image_id, 'annotations': target}
-        img, target = self.prepare(img, target)
+        if self.data_type=="val":
+            #print("single phote loading")
+            try:
+                img, target = super(CocoDetection, self).__getitem__(idx)
+            except:
+                print("Error idx: {}".format(idx))
+                idx += 1
+                img, target = super(CocoDetection, self).__getitem__(idx)
+            image_id = self.ids[idx]
+            target = {'image_id': image_id, 'annotations': target}
+            img, target = self.prepare(img, target)
         
-        if self._transforms is not None:
-            img, target = self._transforms(img, target)
+            if self._transforms is not None:
+                img, target = self._transforms(img, target)
 
-        # convert to needed format
-        if self.aux_target_hacks is not None:
-            for hack_runner in self.aux_target_hacks:
-                target, img = hack_runner(target, img=img)
+            if self.aux_target_hacks is not None:
+                for hack_runner in self.aux_target_hacks:
+                    target, img = hack_runner(target, img=img)
+            return img, target
 
-        return img, target
+        elif self.data_type=="train":
+            #print("vision loading")
+            img_list=[]
+            target_list=[]
+            for i in range(self.post_frames+1):
+                index=max(0,idx-i) #使用过去帧
+                try:
+                    img, target = super(CocoDetection, self).__getitem__(index)
+                except:
+                    print("Error idx: {}".format(index))
+                    idx += 1
+                    img, target = super(CocoDetection, self).__getitem__(index)
+                image_id = self.ids[index]
+                target = {'image_id': image_id, 'annotations': target}
+                img, target = self.prepare(img, target)
+        
+                if self._transforms is not None:
+                    img, target = self._transforms(img, target)
+
+                if self.aux_target_hacks is not None:
+                    for hack_runner in self.aux_target_hacks:
+                        target, img = hack_runner(target, img=img)
+                
+                img_list.append(img)
+                target_list.append(target)
+            img_list.reverse()
+            return img_list, target_list[0]
+        elif self.data_type=="test":
+            #print("vision loading")
+            img_list=[]
+            target_list=[]
+            for i in range(self.post_frames+1):
+                index=max(0,idx-i) #使用过去帧
+                try:
+                    img, target = super(CocoDetection, self).__getitem__(index)
+                except:
+                    print("Error idx: {}".format(index))
+                    idx += 1
+                    img, target = super(CocoDetection, self).__getitem__(index)
+                image_id = self.ids[index]
+                target = {'image_id': image_id, 'annotations': target}
+                img, target = self.prepare(img, target)
+        
+                if self._transforms is not None:
+                    img, target = self._transforms(img, target)
+
+                if self.aux_target_hacks is not None:
+                    for hack_runner in self.aux_target_hacks:
+                        target, img = hack_runner(target, img=img)
+                
+                img_list.append(img)
+                target_list.append(target)
+            img_list.reverse()
+            return img_list, target_list[0]
+        else:
+            print("data_type格式不对")
+            assert False
+
 
 
 def convert_coco_poly_to_mask(segmentations, height, width):
@@ -635,7 +742,7 @@ def build(image_set, args):
     dataset = CocoDetection(img_folder, ann_file, 
             transforms=make_coco_transforms(image_set, fix_size=args.fix_size, strong_aug=strong_aug, args=args), 
             return_masks=args.masks,
-            aux_target_hacks=aux_target_hacks_list,
+            aux_target_hacks=aux_target_hacks_list,image_set=image_set
         )
 
     return dataset

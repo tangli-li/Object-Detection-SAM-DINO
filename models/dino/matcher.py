@@ -66,10 +66,15 @@ class HungarianMatcher(nn.Module):
         bs, num_queries = outputs["pred_logits"].shape[:2]
 
         # We flatten to compute the cost matrices in a batch
-        out_prob = outputs["pred_logits"].flatten(0, 1).sigmoid()  # [batch_size * num_queries, num_classes]
-        out_bbox = outputs["pred_boxes"].flatten(0, 1)  # [batch_size * num_queries, 4]
+        if outputs["pred_logits"].ndim==2:
+            out_prob = outputs["pred_logits"].sigmoid()  # [batch_size * num_queries, num_classes]
+            out_bbox = outputs["pred_boxes"]  # [batch_size * num_queries, 4]
+        else:
+            out_prob = outputs["pred_logits"].flatten(0, 1).sigmoid()  # [batch_size * num_queries, num_classes]
+            out_bbox = outputs["pred_boxes"].flatten(0, 1)  # [batch_size * num_queries, 4]
 
         # Also concat the target labels and boxes
+        #print(out_prob.shape)
         tgt_ids = torch.cat([v["labels"] for v in targets])
         tgt_bbox = torch.cat([v["boxes"] for v in targets])
 
@@ -89,6 +94,8 @@ class HungarianMatcher(nn.Module):
         # Final cost matrix
         C = self.cost_bbox * cost_bbox + self.cost_class * cost_class + self.cost_giou * cost_giou
         C = C.view(bs, num_queries, -1).cpu()
+        # print(tgt_ids.shape[0])
+        # C = C.view(bs, tgt_ids.shape[0], -1).cpu()
 
         sizes = [len(v["boxes"]) for v in targets]
         indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]

@@ -296,6 +296,233 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
 
     return stats, coco_evaluator
 
+@torch.no_grad()
+def evaluate_withmini(model, model_mini, criterion, postprocessors, data_loader, base_ds, device, output_dir, frame_start_list=[], save_results=False,wo_class_error=False, args=None, logger=None):
+    try:
+        need_tgt_for_training = args.use_dn
+    except:
+        need_tgt_for_training = False
+
+    model.eval()
+    model_mini.eval()
+    criterion.eval()
+
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    if not wo_class_error:
+        metric_logger.add_meter('class_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
+    header = 'Test:'
+
+    iou_types = tuple(k for k in ('segm', 'bbox') if k in postprocessors.keys())
+    useCats = True
+    try:
+        useCats = args.useCats
+    except:
+        useCats = True
+    if not useCats:
+        print("useCats: {} !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!".format(useCats))
+    coco_evaluator = CocoEvaluator(base_ds, iou_types, useCats=useCats)
+    # coco_evaluator.coco_eval[iou_types[0]].params.iouThrs = [0, 0.1, 0.5, 0.75]
+
+    panoptic_evaluator = None
+    if 'panoptic' in postprocessors.keys():
+        panoptic_evaluator = PanopticEvaluator(
+            data_loader.dataset.ann_file,
+            data_loader.dataset.ann_folder,
+            output_dir=os.path.join(output_dir, "panoptic_eval"),
+        )
+
+    _cnt = 0
+    output_state_dict = {} # for debug only
+    frame_store_reference=[]
+    frame_store_hs=[]
+    count=-1
+    for samples, targets in metric_logger.log_every(data_loader, 10, header, logger=logger):
+        count+=1
+        samples = samples.to(device)
+
+        # targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+        targets = [{k: to_device(v, device) for k, v in t.items()} for t in targets]
+        frame_input_reference=[]
+        frame_input_hs=[]
+
+        with torch.cuda.amp.autocast(enabled=args.amp):
+            reference,hs=model(samples,targets=None,return_ref=True)
+            if frame_start_list!=[]:
+                if count in frame_start_list:
+                    frame_store_hs=[]
+            if len(frame_store_hs)==0:
+                frame_store_reference.append(reference)
+                frame_store_hs.append(hs)
+                for i in range(4):
+                    frame_input_reference.append(reference)
+                    frame_input_hs.append(hs)
+            elif len(frame_store_hs)==1:
+                frame_store_reference.append(reference)
+                frame_store_hs.append(hs)
+                frame_input_reference=frame_store_reference[0:1]
+                frame_input_hs=frame_store_hs[0:1]
+                for i in range(3):
+                    frame_input_reference.append(reference)
+                    frame_input_hs.append(hs)
+            elif len(frame_store_hs)==2:
+                frame_store_reference.append(reference)
+                frame_store_hs.append(hs)
+                frame_input_reference=frame_store_reference[0:2]
+                frame_input_hs=frame_store_hs[0:2]
+                for i in range(2):
+                    frame_input_reference.append(reference)
+                    frame_input_hs.append(hs)
+            elif len(frame_store_hs)==3:
+                frame_store_reference.append(reference)
+                frame_store_hs.append(hs)
+                frame_input_reference=frame_store_reference[0:3]
+                frame_input_hs=frame_store_hs[0:3]
+                for i in range(1):
+                    frame_input_reference.append(reference)
+                    frame_input_hs.append(hs)
+            else:
+                assert len(frame_store_hs)==4#最后一帧为当前帧
+                frame_store_reference.pop(0)
+                frame_store_reference.append(reference)
+                frame_store_hs.pop(0)
+                frame_store_hs.append(hs)
+                frame_input_hs=frame_store_hs
+                frame_input_reference=frame_store_reference
+            outputs = model_mini(frame_input_hs,frame_input_reference)
+            outputs['dn_meta']=None
+            # outputs = model(samples)
+
+            loss_dict = criterion(outputs, targets)
+        weight_dict = criterion.weight_dict
+
+        # reduce losses over all GPUs for logging purposes
+        loss_dict_reduced = utils.reduce_dict(loss_dict)
+        loss_dict_reduced_scaled = {k: v * weight_dict[k]
+                                    for k, v in loss_dict_reduced.items() if k in weight_dict}
+        loss_dict_reduced_unscaled = {f'{k}_unscaled': v
+                                      for k, v in loss_dict_reduced.items()}
+        metric_logger.update(loss=sum(loss_dict_reduced_scaled.values()),
+                             **loss_dict_reduced_scaled,
+                             **loss_dict_reduced_unscaled)
+        if 'class_error' in loss_dict_reduced:
+            metric_logger.update(class_error=loss_dict_reduced['class_error'])
+
+        orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
+        results = postprocessors['bbox'](outputs, orig_target_sizes)
+        # [scores: [100], labels: [100], boxes: [100, 4]] x B
+        if 'segm' in postprocessors.keys():
+            target_sizes = torch.stack([t["size"] for t in targets], dim=0)
+            results = postprocessors['segm'](results, outputs, orig_target_sizes, target_sizes)
+        res = {target['image_id'].item(): output for target, output in zip(targets, results)}
+
+        if coco_evaluator is not None:
+            coco_evaluator.update(res)
+
+        if panoptic_evaluator is not None:
+            res_pano = postprocessors["panoptic"](outputs, target_sizes, orig_target_sizes)
+            for i, target in enumerate(targets):
+                image_id = target["image_id"].item()
+                file_name = f"{image_id:012d}.png"
+                res_pano[i]["image_id"] = image_id
+                res_pano[i]["file_name"] = file_name
+
+            panoptic_evaluator.update(res_pano)
+        
+        if save_results:
+            # res_score = outputs['res_score']
+            # res_label = outputs['res_label']
+            # res_bbox = outputs['res_bbox']
+            # res_idx = outputs['res_idx']
+
+
+            for i, (tgt, res, outbbox) in enumerate(zip(targets, results, outputs['pred_boxes'])):
+                """
+                pred vars:
+                    K: number of bbox pred
+                    score: Tensor(K),
+                    label: list(len: K),
+                    bbox: Tensor(K, 4)
+                    idx: list(len: K)
+                tgt: dict.
+
+                """
+                # compare gt and res (after postprocess)
+                gt_bbox = tgt['boxes']
+                gt_label = tgt['labels']
+                gt_info = torch.cat((gt_bbox, gt_label.unsqueeze(-1)), 1)
+                
+                # img_h, img_w = tgt['orig_size'].unbind()
+                # scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=0)
+                # _res_bbox = res['boxes'] / scale_fct
+                _res_bbox = outbbox
+                _res_prob = res['scores']
+                _res_label = res['labels']
+                print(gt_bbox)
+                print(gt_label)
+                print(_res_bbox)
+                print(_res_label)
+                res_info = torch.cat((_res_bbox, _res_prob.unsqueeze(-1), _res_label.unsqueeze(-1)), 1)
+                # import ipdb;ipdb.set_trace()
+
+                if 'gt_info' not in output_state_dict:
+                    output_state_dict['gt_info'] = []
+                output_state_dict['gt_info'].append(gt_info.cpu())
+
+                if 'res_info' not in output_state_dict:
+                    output_state_dict['res_info'] = []
+                output_state_dict['res_info'].append(res_info.cpu())
+
+            # # for debug only
+            # import random
+            # if random.random() > 0.7:
+            #     print("Now let's break")
+            #     break
+
+        _cnt += 1
+        if args.debug:
+            if _cnt % 15 == 0:
+                print("BREAK!"*5)
+                break
+
+    if args.save_results:
+        import os.path as osp
+        
+        # output_state_dict['gt_info'] = torch.cat(output_state_dict['gt_info'])
+        # output_state_dict['res_info'] = torch.cat(output_state_dict['res_info'])
+        savepath = osp.join(args.output_dir, 'results-{}.pkl'.format(utils.get_rank()))
+        print("Saving res to {}".format(savepath))
+        torch.save(output_state_dict, savepath)
+
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
+    if coco_evaluator is not None:
+        coco_evaluator.synchronize_between_processes()
+    if panoptic_evaluator is not None:
+        panoptic_evaluator.synchronize_between_processes()
+
+    # accumulate predictions from all images
+    if coco_evaluator is not None:
+        coco_evaluator.accumulate()
+        coco_evaluator.summarize()
+        
+    panoptic_res = None
+    if panoptic_evaluator is not None:
+        panoptic_res = panoptic_evaluator.summarize()
+    stats = {k: meter.global_avg for k, meter in metric_logger.meters.items() if meter.count > 0}
+    if coco_evaluator is not None:
+        if 'bbox' in postprocessors.keys():
+            stats['coco_eval_bbox'] = coco_evaluator.coco_eval['bbox'].stats.tolist()
+        if 'segm' in postprocessors.keys():
+            stats['coco_eval_masks'] = coco_evaluator.coco_eval['segm'].stats.tolist()
+    if panoptic_res is not None:
+        stats['PQ_all'] = panoptic_res["All"]
+        stats['PQ_th'] = panoptic_res["Things"]
+        stats['PQ_st'] = panoptic_res["Stuff"]
+
+
+
+    return stats, coco_evaluator
 
 @torch.no_grad()
 def test(model, criterion, postprocessors, data_loader, base_ds, device, output_dir, wo_class_error=False, args=None, logger=None):

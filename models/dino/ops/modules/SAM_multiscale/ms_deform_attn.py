@@ -56,8 +56,8 @@ class MSDeformAttn(nn.Module):#(DINO with SAM module)
             self.sampling_offsets = nn.Linear(d_model, n_heads * n_levels * n_points * 2)
             self.attention_weights = nn.Linear(d_model, n_heads * n_levels * n_points)
         if dec_attn==True:
-            self.sampling_offsets = nn.Linear(d_model, n_points *n_levels* 2)
-            self.attention_weights = nn.Linear(d_model, n_points*n_levels)
+            self.sampling_offsets = nn.Linear(d_model, n_points * 2)
+            self.attention_weights = nn.Linear(d_model, n_points)
 
         self.value_proj = nn.Linear(d_model, d_model)
         self.output_proj = nn.Linear(d_model, d_model)
@@ -85,7 +85,7 @@ class MSDeformAttn(nn.Module):#(DINO with SAM module)
 
     def forward(self, query, reference_points, input_flatten, input_spatial_shapes, input_level_start_index, input_padding_mask=None):
         """
-        :param query                       (N, Length_{query},n_heads, C) or (N, Length_{query}, C)
+        :param query                       (N, Length_{query}, n_level,n_heads, C) or (N, Length_{query}, C)
         :param reference_points            (N, Length_{query}, n_levels, 2), range in [0, 1], top-left (0,0), bottom-right (1, 1), including padding area
                                         or (N, Length_{query}, n_levels, 4), add additional (w, h) to form reference boxes
         :param input_flatten               (N, \sum_{l=0}^{L-1} H_l \cdot W_l, C)
@@ -108,7 +108,7 @@ class MSDeformAttn(nn.Module):#(DINO with SAM module)
         if len(Q_sizelist)==3 and self.dec_attn==False:
             sampling_offsets = self.sampling_offsets(query).view(N, Len_q, self.n_heads, self.n_levels, self.n_points,2)
             attention_weights = self.attention_weights(query).view(N, Len_q, self.n_heads,self.n_levels * self.n_points)
-        if len(Q_sizelist)==4 and self.dec_attn==True:#query([2, 1090,  8, 256])
+        if len(Q_sizelist)==5 and self.dec_attn==True:#query([2, 1090, 4, 8, 256])
             sampling_offsets = self.sampling_offsets(query).view(N, Len_q, self.n_heads, self.n_levels, self.n_points, 2)#Q的偏移量
             attention_weights = self.attention_weights(query).view(N, Len_q, self.n_heads, self.n_levels * self.n_points)
         attention_weights = F.softmax(attention_weights, -1).view(N, Len_q, self.n_heads, self.n_levels, self.n_points)#注意力权重，每一个头都归一化

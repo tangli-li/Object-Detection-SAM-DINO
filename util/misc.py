@@ -281,11 +281,18 @@ def get_sha():
     message = f"sha: {sha}, status: {diff}, branch: {branch}"
     return message
 
-
 def collate_fn(batch):
-
     batch = list(zip(*batch))
     batch[0] = nested_tensor_from_tensor_list(batch[0])
+    return tuple(batch)
+
+def collate_fn_mini(batch):
+    batch = list(zip(*batch))
+    batch[0] = nested_tensor_from_tensor_list_mini(batch[0])
+    # print(len(batch[0][0]))
+    # for i in range(len(batch[0][0])):
+    #     print(type(batch[0][0][i]))
+    #     batch[0][0][i] = nested_tensor_from_tensor_list(batch[0][0][i])
     return tuple(batch)
 
 
@@ -374,7 +381,8 @@ class NestedTensor(object):
 
 def nested_tensor_from_tensor_list(tensor_list: List[Tensor]):
     # TODO make this more general
-    if tensor_list[0].ndim == 3:
+    if tensor_list[0].ndim == 3 or tensor_list.ndim == 3:
+    # if tensor_list[0].ndim == 3:
         if torchvision._is_tracing():
             # nested_tensor_from_tensor_list() does not export well to ONNX
             # call _onnx_nested_tensor_from_tensor_list() instead
@@ -395,6 +403,33 @@ def nested_tensor_from_tensor_list(tensor_list: List[Tensor]):
     else:
         raise ValueError('not supported')
     return NestedTensor(tensor, mask)
+
+def nested_tensor_from_tensor_list_mini(tensor_list: List[Tensor]):
+    # TODO make this more general
+    if tensor_list[0][0].ndim == 3:
+        if torchvision._is_tracing():
+            # nested_tensor_from_tensor_list() does not export well to ONNX
+            # call _onnx_nested_tensor_from_tensor_list() instead
+            return _onnx_nested_tensor_from_tensor_list(tensor_list)
+
+        # TODO make it support different-sized images
+        new_list=[]
+        for i in range(len(tensor_list[0])):
+            max_size = _max_by_axis([list(img[i].shape) for img in tensor_list])
+        # min_size = tuple(min(s) for s in zip(*[img.shape for img in tensor_list]))
+            batch_shape = [len(tensor_list)] + max_size
+            b, c, h, w = batch_shape
+            dtype = tensor_list[0][i].dtype
+            device = tensor_list[0][i].device
+            tensor = torch.zeros(batch_shape, dtype=dtype, device=device)
+            mask = torch.ones((b, h, w), dtype=torch.bool, device=device)
+            for img, pad_img, m in zip(tensor_list, tensor, mask):
+                pad_img[: img[i].shape[0], : img[i].shape[1], : img[i].shape[2]].copy_(img[i])
+                m[: img[i].shape[1], :img[i].shape[2]] = False
+            new_list.append(NestedTensor(tensor, mask))
+    else:
+        raise ValueError('not supported')
+    return new_list
 
 
 # _onnx_nested_tensor_from_tensor_list() is an implementation of

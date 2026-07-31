@@ -72,6 +72,10 @@ class DINO(nn.Module):
                                 -2 : learn a shared w and h
         """
         super().__init__()
+        # print(num_queries)
+        # print(num_classes)
+        # print(type(transformer))
+        # print(type(backbone))
         self.num_queries = num_queries
         self.transformer = transformer
         self.num_classes = num_classes
@@ -218,7 +222,7 @@ class DINO(nn.Module):
         else:
             raise NotImplementedError('Unknown fix_refpoints_hw {}'.format(self.fix_refpoints_hw))
 
-    def forward(self, samples: NestedTensor, targets:List=None):
+    def forward(self, samples: NestedTensor, targets:List=None, return_ref=False):
         """ The forward expects a NestedTensor, which consists of:
                - samples.tensor: batched images, of shape [batch_size x 3 x H x W]
                - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
@@ -268,9 +272,12 @@ class DINO(nn.Module):
             input_query_bbox = input_query_label = attn_mask = dn_meta = None
 
         hs, reference, hs_enc, ref_enc, init_box_proposal = self.transformer(srcs, masks, input_query_bbox, poss,input_query_label,attn_mask)
+        # print(f"hs:{hs[0].shape}")
+        # print(f"refe:{reference[0].shape}")
+        if return_ref==True:
+            return hs, reference
         # In case num object=0
         hs[0] += self.label_enc.weight[0,0]*0.0
-
         # deformable-detr-like anchor update
         # reference_before_sigmoid = inverse_sigmoid(reference[:-1]) # n_dec, bs, nq, 4
         outputs_coord_list = []
@@ -471,6 +478,15 @@ class SetCriterion(nn.Module):
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
         return loss_map[loss](outputs, targets, indices, num_boxes, **kwargs)
 
+    def get_loss_minimodel(self, loss, outputs, targets, indices, num_boxes, **kwargs):
+        loss_map = {
+            'labels': self.loss_labels,
+            'cardinality': self.loss_cardinality,
+            'boxes': self.loss_boxes,
+        }
+        assert loss in loss_map, f'do you really want to compute {loss} loss?'
+        return loss_map[loss](outputs, targets, indices, num_boxes, **kwargs)
+
     def forward(self, outputs, targets, return_indices=False):
         """ This performs the loss computation.
         Parameters:
@@ -483,6 +499,9 @@ class SetCriterion(nn.Module):
         """
         outputs_without_aux = {k: v for k, v in outputs.items() if k != 'aux_outputs'}
         device=next(iter(outputs.values())).device
+        # print("*")
+        # print(outputs_without_aux.keys())
+        # print(targets)
         indices = self.matcher(outputs_without_aux, targets)
 
         if return_indices:

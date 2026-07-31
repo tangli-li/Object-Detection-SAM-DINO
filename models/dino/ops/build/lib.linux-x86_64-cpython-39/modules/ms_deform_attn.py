@@ -1,11 +1,11 @@
 # ------------------------------------------------------------------------------------------------
-# Deformable DETR (DINO with SAM module)
+# Deformable DETR
 # Copyright (c) 2020 SenseTime. All Rights Reserved.
 # Licensed under the Apache License, Version 2.0 [see LICENSE for details]
 # ------------------------------------------------------------------------------------------------
 # Modified from https://github.com/chengdazhi/Deformable-Convolution-V2-PyTorch/tree/pytorch_1.0.0
 # ------------------------------------------------------------------------------------------------
-#DINO+SAM
+
 from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import division
@@ -27,8 +27,8 @@ def _is_power_of_2(n):
     return (n & (n-1) == 0) and n != 0
 
 
-class MSDeformAttn(nn.Module):#(DINO with SAM module)
-    def __init__(self, d_model=256, n_levels=4, n_heads=8, n_points=4,dec_attn=False):#解码器交叉和编码器自注意都会用
+class MSDeformAttn(nn.Module):
+    def __init__(self, d_model=256, n_levels=4, n_heads=8, n_points=4):
         """
         Multi-Scale Deformable Attention Module
         :param d_model      hidden dimension
@@ -51,14 +51,9 @@ class MSDeformAttn(nn.Module):#(DINO with SAM module)
         self.n_levels = n_levels
         self.n_heads = n_heads
         self.n_points = n_points
-        self.dec_attn=dec_attn
-        if dec_attn==False:
-            self.sampling_offsets = nn.Linear(d_model, n_heads * n_levels * n_points * 2)
-            self.attention_weights = nn.Linear(d_model, n_heads * n_levels * n_points)
-        if dec_attn==True:
-            self.sampling_offsets = nn.Linear(d_model, n_points *n_levels* 2)
-            self.attention_weights = nn.Linear(d_model, n_points*n_levels)
 
+        self.sampling_offsets = nn.Linear(d_model, n_heads * n_levels * n_points * 2)
+        self.attention_weights = nn.Linear(d_model, n_heads * n_levels * n_points)
         self.value_proj = nn.Linear(d_model, d_model)
         self.output_proj = nn.Linear(d_model, d_model)
 
@@ -72,12 +67,9 @@ class MSDeformAttn(nn.Module):#(DINO with SAM module)
         for i in range(self.n_points):
             grid_init[:, :, i, :] *= i + 1
         with torch.no_grad():
-            if self.dec_attn==False:
-                self.sampling_offsets.bias = nn.Parameter(grid_init.view(-1))
-            else:
-                constant_(self.sampling_offsets.bias.data, 0.)##初始化的参数需要匹配输出
-        constant_(self.attention_weights.bias.data, 0.)
+            self.sampling_offsets.bias = nn.Parameter(grid_init.view(-1))
         constant_(self.attention_weights.weight.data, 0.)
+        constant_(self.attention_weights.bias.data, 0.)
         xavier_uniform_(self.value_proj.weight.data)
         constant_(self.value_proj.bias.data, 0.)
         xavier_uniform_(self.output_proj.weight.data)
@@ -85,7 +77,7 @@ class MSDeformAttn(nn.Module):#(DINO with SAM module)
 
     def forward(self, query, reference_points, input_flatten, input_spatial_shapes, input_level_start_index, input_padding_mask=None):
         """
-        :param query                       (N, Length_{query},n_heads, C) or (N, Length_{query}, C)
+        :param query                       (N, Length_{query}, C)
         :param reference_points            (N, Length_{query}, n_levels, 2), range in [0, 1], top-left (0,0), bottom-right (1, 1), including padding area
                                         or (N, Length_{query}, n_levels, 4), add additional (w, h) to form reference boxes
         :param input_flatten               (N, \sum_{l=0}^{L-1} H_l \cdot W_l, C)
@@ -95,29 +87,23 @@ class MSDeformAttn(nn.Module):#(DINO with SAM module)
 
         :return output                     (N, Length_{query}, C)
         """
-        #C一般是d_model,N是bs
-        Q_sizelist=list(query.shape)
-        Len_q=Q_sizelist[1]
+        N, Len_q, _ = query.shape
         N, Len_in, _ = input_flatten.shape
         assert (input_spatial_shapes[:, 0] * input_spatial_shapes[:, 1]).sum() == Len_in
 
         value = self.value_proj(input_flatten)
         if input_padding_mask is not None:
             value = value.masked_fill(input_padding_mask[..., None], float(0))
-        value = value.view(N, Len_in, self.n_heads, self.d_model // self.n_heads)#值投影处理，每个采样头的V
-        if len(Q_sizelist)==3 and self.dec_attn==False:
-            sampling_offsets = self.sampling_offsets(query).view(N, Len_q, self.n_heads, self.n_levels, self.n_points,2)
-            attention_weights = self.attention_weights(query).view(N, Len_q, self.n_heads,self.n_levels * self.n_points)
-        if len(Q_sizelist)==4 and self.dec_attn==True:#query([2, 1090,  8, 256])
-            sampling_offsets = self.sampling_offsets(query).view(N, Len_q, self.n_heads, self.n_levels, self.n_points, 2)#Q的偏移量
-            attention_weights = self.attention_weights(query).view(N, Len_q, self.n_heads, self.n_levels * self.n_points)
-        attention_weights = F.softmax(attention_weights, -1).view(N, Len_q, self.n_heads, self.n_levels, self.n_points)#注意力权重，每一个头都归一化
+        value = value.view(N, Len_in, self.n_heads, self.d_model // self.n_heads)
+        sampling_offsets = self.sampling_offsets(query).view(N, Len_q, self.n_heads, self.n_levels, self.n_points, 2)
+        attention_weights = self.attention_weights(query).view(N, Len_q, self.n_heads, self.n_levels * self.n_points)
+        attention_weights = F.softmax(attention_weights, -1).view(N, Len_q, self.n_heads, self.n_levels, self.n_points)
         # N, Len_q, n_heads, n_levels, n_points, 2
-        if reference_points.shape[-1] == 2:#宽高
+        if reference_points.shape[-1] == 2:
             offset_normalizer = torch.stack([input_spatial_shapes[..., 1], input_spatial_shapes[..., 0]], -1)
             sampling_locations = reference_points[:, :, None, :, None, :] \
                                  + sampling_offsets / offset_normalizer[None, None, None, :, None, :]
-        elif reference_points.shape[-1] == 4:#将偏移量限制在宽高内，让模型在框内寻找，为什么要使用self.n_points再缩放一次？
+        elif reference_points.shape[-1] == 4:
             sampling_locations = reference_points[:, :, None, :, None, :2] \
                                  + sampling_offsets / self.n_points * reference_points[:, :, None, :, None, 2:] * 0.5
         else:

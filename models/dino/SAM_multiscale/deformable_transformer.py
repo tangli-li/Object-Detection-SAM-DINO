@@ -885,8 +885,8 @@ class DeformableTransformerDecoderLayer(nn.Module):
         nn.init.constant_(self.point2[-1].weight.data, 0)
         nn.init.constant_(self.point2[-1].bias.data, 0)
 
-        self.attn1 = nn.Linear(d_model, d_model * self.nheads)#用于previous query
-        self.attn2 = nn.Linear(d_model, d_model * self.nheads)
+        self.attn1 = nn.Linear(d_model, d_model * self.nheads*self.nlevels)#用于previous query
+        self.attn2 = nn.Linear(d_model, d_model * self.nheads*self.nlevels)
 
     def rm_self_attn_modules(self):
         self.self_attn = None
@@ -978,53 +978,66 @@ class DeformableTransformerDecoderLayer(nn.Module):
             #特征图还原，参考框调整有效比，参考tgt_reference_points做法选择第一尺度
             #H_, W_=spatial_shapes[0,:].shape
             bs,_,d_model=memory.shape
-            bs,num_queries,_=tgt_reference_points.shape
-            H_ = spatial_shapes[0]
-            W_ = spatial_shapes[1]
+            bs,num_queries,n_level,_=tgt_reference_points.shape
+            H_ = spatial_shapes[:, 0]
+            W_ = spatial_shapes[:, 1]
 
-            references_boxes_xy[:, :,  0] *= W_
-            references_boxes_xy[:, :,  1] *= H_
-            references_boxes_xy[:, :,  2] *= W_
-            references_boxes_xy[:, :,  3] *= H_  # valid_ratios bs,  2
-            references_boxes_xy = references_boxes_xy * torch.cat([valid_ratios, valid_ratios], -1)[:, None, :]
+            count_level=0
+            q_content_list=[]
+            q_content_points_list=[]
+            for i in range(n_level):
+                references_boxes_xy[:, :, i, 0] *= W_[i]
+                references_boxes_xy[:, :, i, 1] *= H_[i]
+                references_boxes_xy[:, :, i, 2] *= W_[i]
+                references_boxes_xy[:, :, i, 3] *= H_[i]#valid_ratios bs, nlevel, 2
+                references_boxes_xy_i=references_boxes_xy[:, :, i, :]* torch.cat([valid_ratios[:,i,:], valid_ratios[:,i,:]], -1)[:,None, :]
 
-            memory_2d = memory[:, 0:W_ * H_, :].view(bs, H_, W_, d_model)
-            memory_2d = memory_2d.permute(0, 3, 1, 2)
+                memory_2d = memory[:, count_level:count_level+W_[i] * H_[i], :].view(bs, H_[i], W_[i], d_model)
+                memory_2d=memory_2d.permute(0,3,1,2)
+                count_level += W_[i] * H_[i]
 
                 #memory_2d[bs,d_model,H_,W_],references_boxes_xy[bs,nq,nl,4]
-            q_content = torchvision.ops.roi_align(
-                memory_2d,
-                list(torch.unbind(references_boxes_xy, dim=0)),
-                output_size=(7, 7),
-                spatial_scale=1.0,
-                aligned=True)
-            q_content_points = torchvision.ops.roi_align(
-                memory_2d,
-                list(torch.unbind(references_boxes_xy, dim=0)),
-                output_size=(7, 7),
-                spatial_scale=1.0,
-                aligned=True)  # (bs * nq, d_model, 7, 7)
+                q_content = torchvision.ops.roi_align(
+                    memory_2d,
+                    list(torch.unbind(references_boxes_xy_i, dim=0)),
+                    output_size=(7, 7),
+                    spatial_scale=1.0,
+                    aligned=True)
+                q_content_points = torchvision.ops.roi_align(
+                    memory_2d,
+                    list(torch.unbind(references_boxes_xy_i, dim=0)),
+                    output_size=(7, 7),
+                    spatial_scale=1.0,
+                    aligned=True)  # (bs * nq, d_model, 7, 7)
+                q_content_list.append(q_content)
+                q_content_points_list.append(q_content_points)
+            q_content=torch.stack(q_content_list,dim=1)
+            q_content_points=torch.stack(q_content_points_list,dim=1)
 
-            q_content_points = q_content_points.view(bs * num_queries, -1, 7, 7)
+            q_content_points = q_content_points.view(bs * num_queries*n_level, -1, 7, 7)
             points = self.point1(q_content_points)
-            points = points.reshape(bs * num_queries, -1)
+            points = points.reshape(bs * num_queries, n_level, -1)
             points = self.point2(points)#(bs * nq,n_level,self.nheads*2)
-            points = points.view(bs * num_queries, 1, self.nheads, 2).tanh()#集中到-1，1之间，采样self.nheads个点
+            points = points.view(bs * num_queries, n_level,1, self.nheads, 2).tanh()#集中到-1，1之间，采样self.nheads个点
 
             #F.grid_sample输出[bs * num_queries，d_model,1,self.nheads]
-            q_content = F.grid_sample(q_content, points, padding_mode="zeros",align_corners=False).view(bs * num_queries, -1)
-            q_content = q_content.view(bs, num_queries, 8, -1)  # (bs,num_query , n_head ,d_model,)
-            q_content = q_content * self.attn1(pre_query).view(bs, num_queries,self.nheads, d_model).sigmoid()
+            q_content_before_attn=[]
+            for i in range(n_level):
+                q_content_0 = F.grid_sample(q_content[:,i,:,:,:], points[:,i,:,:,:], padding_mode="zeros", align_corners=False).view(bs * num_queries,-1)
+                q_content_0 = q_content_0.view(bs, num_queries, 8, -1)  # (bs,num_query , n_head ,d_model,)
+                q_content_before_attn.append(q_content_0)
+            q_content=torch.stack(q_content_before_attn,dim=2)
+            q_content = q_content * self.attn1(pre_query).view(bs, num_queries, n_level,self.nheads, d_model).sigmoid()
 
-            q_pos_center = tgt_reference_points[:, :, :2].reshape(bs, num_queries,  1, 2).expand(-1, -1, self.nheads, -1)
-            q_pos_scale = tgt_reference_points[:, :,  2:].reshape(bs, num_queries, 1, 2).expand(-1, -1,self.nheads,-1) * 0.5
-            q_pos_delta = points.reshape(bs, num_queries, self.nheads, 2)
+            q_pos_center = tgt_reference_points[:, :, :, :2].reshape(bs, num_queries, n_level, 1, 2).expand(-1, -1, -1,self.nheads, -1)
+            q_pos_scale = tgt_reference_points[:, :, :, 2:].reshape(bs, num_queries, n_level, 1, 2).expand(-1, -1, -1,self.nheads,-1) * 0.5
+            q_pos_delta = points.reshape(bs, num_queries, n_level,self.nheads, 2)
             q_pos = q_pos_center + q_pos_scale * q_pos_delta#只对宽高处理
 
-            q_pos = q_pos.reshape(bs, num_queries * self.nheads, 2)
-            q_pos = gen_sineembed_for_position(q_pos).reshape(bs, num_queries,  self.nheads, d_model)
+            q_pos = q_pos.reshape(bs, num_queries * self.nheads*n_level, 2)
+            q_pos = gen_sineembed_for_position(q_pos).reshape(bs, num_queries, n_level, self.nheads, d_model)
             # tgt_query_sine_embed
-            q_pos = q_pos * self.attn2(pre_query).view(bs, num_queries, self.nheads, d_model).sigmoid()
+            q_pos = q_pos * self.attn2(pre_query).view(bs, num_queries, n_level, self.nheads, d_model).sigmoid()
 
             return self.with_pos_embed(q_content, q_pos) #(bs,num_query , n_head, d_model)
 
@@ -1037,8 +1050,8 @@ class DeformableTransformerDecoderLayer(nn.Module):
                 tgt = tgt + self.key_aware_proj(memory).mean(0, keepdim=True)
             else:
                 raise NotImplementedError("Unknown key_aware_type: {}".format(self.key_aware_type))
-        Query = SAM(tgt.transpose(0, 1), memory.transpose(0, 1), memory_spatial_shapes[0,:],\
-                    tgt_reference_points[:,:,0,:].transpose(0, 1),tgt_valid_ratios[:,0,:])
+        Query = SAM(tgt.transpose(0, 1), memory.transpose(0, 1), memory_spatial_shapes,\
+                    tgt_reference_points.transpose(0, 1),tgt_valid_ratios)
         tgt2 = self.cross_attn(Query,
                                tgt_reference_points.transpose(0, 1).contiguous(),
                                memory.transpose(0, 1), memory_spatial_shapes, memory_level_start_index, memory_key_padding_mask).transpose(0, 1)
