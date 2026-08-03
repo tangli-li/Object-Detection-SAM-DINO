@@ -6,7 +6,7 @@ In brief, I insert a semantic alignment module into DINO to evaluate how much th
 
 The training and testing data come from [HA-VID](https://iai-hrc.github.io/ha-vid), an assembly dataset for industrial scenarios.
 
-The [checkpoints](https://huggingface.co/tl121212/sam-dino) of SAM-DINO and temporal module have been uploaded to Hugging Face. Checkpoint_best_regular.pth is SAM-DINO's checkpoint, while temporal_module.pth is the checkpoint of temporal module.
+The [checkpoints](https://huggingface.co/tl121212/sam-dino) of SAM-DINO and temporal module have been uploaded to Hugging Face. SAM-DINO's checkpoint is checkpoint_best_regular.pth, while temporal_module.pth is the checkpoint of temporal module.
 
 ## Environment
 
