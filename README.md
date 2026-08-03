@@ -4,7 +4,7 @@ This is a demo of my object detection project. I mainly referred to the [DINO](h
 
 In brief, I insert a semantic alignment module into DINO to evaluate how much the detection accuracy can be improved. DINO with semantic alignment module is named as SAM-DINO in this project. In addition, I designed a temporal module to experiment with processing multi-frame information using SAM-DINO.
 
-The training and testing data come from [HA-VID](https://iai-hrc.github.io/ha-vid), an assembly dataset for industrial scenarios.
+The training and testing data come from [HA-VID](https://iai-hrc.github.io/ha-vid), an assembly dataset for industrial scenarios. All model training, inference, and testing are performed on the RTX 3060.
 
 The [checkpoints](https://huggingface.co/tl121212/sam-dino) of SAM-DINO and temporal module have been uploaded to Hugging Face. SAM-DINO's checkpoint is checkpoint_best_regular.pth, while temporal_module.pth is the checkpoint of temporal module.
 
