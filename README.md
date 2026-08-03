@@ -2,7 +2,7 @@
 
 This is a demo of my object detection project. I mainly referred to the [DINO](https://arxiv.org/abs/2203.03605) and [SAM-DETR](https://arxiv.org/abs/2203.06883) paper. The code implementation is also modified based on the official [DINO code](https://github.com/IDEA-Research/DINO).
 
-In brief, I insert a semantic alignment module into DINO to evaluate how much the detection accuracy can be improved. DINO with semantic alignment module is named as SAM-DINO in this project. In addition, I designed a temporal module to experiment with processing multi-frame information using DINO.
+In brief, I insert a semantic alignment module into DINO to evaluate how much the detection accuracy can be improved. DINO with semantic alignment module is named as SAM-DINO in this project. In addition, I designed a temporal module to experiment with processing multi-frame information using SAM-DINO.
 
 The training and testing data come from [HA-VID](https://iai-hrc.github.io/ha-vid), an assembly dataset for industrial scenarios.
 
