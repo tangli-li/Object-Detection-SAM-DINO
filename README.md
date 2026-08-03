@@ -6,6 +6,8 @@ In brief, I insert a semantic alignment module into DINO to evaluate how much th
 
 The training and testing data come from [HA-VID](https://iai-hrc.github.io/ha-vid), an assembly dataset for industrial scenarios.
 
+The [checkpoints](https://huggingface.co/tl121212/sam-dino) of SAM-DINO and temporal module have been uploaded to Hugging Face.
+
 ## Environment
 
 It only needs to support normal inference for DINO and SAM-DETR.
@@ -65,6 +67,8 @@ python showing-sam-dino-time.py -c config/DINO/DINO_4scale_swin.py
 ```
 
 ## Demo of SAM-DINO
+
+The following scenes are from the HA‑VID validation set. Click the image to view the video.
 
 |  | scene 1 | scene 2 |
 |---------|---------|---------|
