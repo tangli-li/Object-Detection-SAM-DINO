@@ -6,7 +6,7 @@ In brief, I insert a semantic alignment module into DINO to evaluate how much th
 
 The training and testing data come from [HA-VID](https://iai-hrc.github.io/ha-vid), an assembly dataset for industrial scenarios.
 
-The [checkpoints](https://huggingface.co/tl121212/sam-dino) of SAM-DINO and temporal module have been uploaded to Hugging Face.
+The [checkpoints](https://huggingface.co/tl121212/sam-dino) of SAM-DINO and temporal module have been uploaded to Hugging Face. checkpoint_best_regular.pth is SAM-DINO's checkpoint, while temporal_module.pth is the checkpoint of temporal module.
 
 ## Environment
 
@@ -33,16 +33,16 @@ if __name__=="__main__":
     main()
 ```
 
-Cause the temporal module is designed based on SAM-DINO. Only after the SAM-DINO has been trained can you train the temporal module.
+Only after the SAM-DINO has been trained can you train the temporal module.  Don't forget to change the SAM-DINO's checkpoint at line 373 in small_model.py.
 
 ### Testing
 
-(1) Test SAM-DINO.
+(1) Test SAM-DINO. Change the SAM-DINO's checkpoint in DINO_eval.sh.
 ```
 sh DINO_eval.sh
 ```
 
-(2) Test temporal module. 
+(2) Test temporal module. Change the checkpoints of SAM-DINO and temporal module from line 438 to 439 in small_model.py.
 ```
 python small_model.py
 ```
@@ -56,12 +56,12 @@ if __name__=="__main__":
 
 ### Inferencing image
 
-(1) SAM-DINO.
+(1) SAM-DINO. Change the SAM-DINO's checkpoint at line 41 in showing-sam-dino.py.
 ```
 python showing-sam-dino.py -c config/DINO/DINO_4scale_swin.py
 ```
 
-(2) SAM-DINO with temporal module.
+(2) SAM-DINO with temporal module. Change the checkpoints of SAM-DINO and temporal module from line 154 to 155 in showing-sam-dino-time.py.
 ```
 python showing-sam-dino-time.py -c config/DINO/DINO_4scale_swin.py
 ```
