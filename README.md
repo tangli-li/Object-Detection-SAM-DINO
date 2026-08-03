@@ -66,8 +66,8 @@ python showing-sam-dino-time.py -c config/DINO/DINO_4scale_swin.py
 
 ## Demo of SAM-DINO
 
-| ... | scene 1 | scene 2 |
+|  | scene 1 | scene 2 |
 |---------|---------|---------|
-| without temporal module | 文字2<br><video src="./video_sam_dino_0.mp4" ...></video> | ... |
+| without temporal module | **视频A**<br><video src="https://github.com/tangli-li/Object-Detection-SAM-DINO/raw/refs/heads/main/video_sam_dino_0.mp4" controls width="200" preload="metadata"></video> | ... |
 | with temporal module | ... | ... |
 
